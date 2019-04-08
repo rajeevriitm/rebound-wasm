@@ -12,6 +12,7 @@ import stripBanner from 'rollup-plugin-strip-banner';
 import uglify from 'rollup-plugin-uglify';
 import resolve from 'rollup-plugin-node-resolve';
 import * as path from 'path';
+import wasm from 'rollup-plugin-wasm'
 
 const shouldMinify = process.env.NODE_ENV === 'production';
 
@@ -37,6 +38,11 @@ export default {
       `.trim(),
   },
   plugins: [
+    wasm({
+      sync: [
+      './pkg/rebound_wasm_bg.wasm'
+      ]
+    }),
     resolve(),
     babel({
       plugins: ['external-helpers'],

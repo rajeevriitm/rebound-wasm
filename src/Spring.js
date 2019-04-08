@@ -16,6 +16,7 @@ import type {SpringListener} from './types';
 import PhysicsState from './PhysicsState';
 import {removeFirst} from './util';
 import SymbolObservable from 'symbol-observable';
+import * as wasm from './wasmLoader';
 
 /**
  * Provides a model of a classical spring acting to
@@ -51,10 +52,12 @@ class Spring {
   _tempState = new PhysicsState();
   _timeAccumulator: number = 0;
   _wasAtRest: boolean = true;
+  _arrayLoc: number;
 
   constructor(springSystem: SpringSystem) {
     this._id = 's' + Spring._ID++;
     this._springSystem = springSystem;
+    this._arrayLoc = wasm.getArray();
   }
 
   /**
@@ -322,71 +325,82 @@ class Spring {
 
     this._timeAccumulator += adjustedDeltaTime;
 
-    const tension = this._springConfig.tension;
-    const friction = this._springConfig.friction;
-    let position = this._currentState.position;
-    let velocity = this._currentState.velocity;
-    let tempPosition = this._tempState.position;
-    let tempVelocity = this._tempState.velocity;
-    let aVelocity;
-    let aAcceleration;
-    let bVelocity;
-    let bAcceleration;
-    let cVelocity;
-    let cAcceleration;
-    let dVelocity;
-    let dAcceleration;
-    let dxdt;
-    let dvdt;
+    if(typeof WebAssembly == "object"){
+      wasm.advance(this._timeAccumulator,Spring.SOLVER_TIMESTEP_SEC,this._endValue,this._springConfig.tension,this._springConfig.friction,this._currentState.position,this._tempState.position,this._currentState.velocity,this._tempState.velocity,this._previousState.position,this._previousState.velocity);
+      this._timeAccumulator = this._arrayLoc[0];
+      this._previousState.position = this._arrayLoc[1];
+      this._previousState.velocity = this._arrayLoc[2];
+      this._tempState.position = this._arrayLoc[3];
+      this._tempState.velocity = this._arrayLoc[4];
+      this._currentState.position = this._arrayLoc[5];
+      this._currentState.velocity = this._arrayLoc[6];
+    }else{
+      const tension = this._springConfig.tension;
+      const friction = this._springConfig.friction;
+      let position = this._currentState.position;
+      let velocity = this._currentState.velocity;
+      let tempPosition = this._tempState.position;
+      let tempVelocity = this._tempState.velocity;
+      let aVelocity;
+      let aAcceleration;
+      let bVelocity;
+      let bAcceleration;
+      let cVelocity;
+      let cAcceleration;
+      let dVelocity;
+      let dAcceleration;
+      let dxdt;
+      let dvdt;
 
-    while (this._timeAccumulator >= Spring.SOLVER_TIMESTEP_SEC) {
-      this._timeAccumulator -= Spring.SOLVER_TIMESTEP_SEC;
+      while (this._timeAccumulator >= Spring.SOLVER_TIMESTEP_SEC) {
+        this._timeAccumulator -= Spring.SOLVER_TIMESTEP_SEC;
 
-      if (this._timeAccumulator < Spring.SOLVER_TIMESTEP_SEC) {
-        this._previousState.position = position;
-        this._previousState.velocity = velocity;
-      }
+        if (this._timeAccumulator < Spring.SOLVER_TIMESTEP_SEC) {
+          this._previousState.position = position;
+          this._previousState.velocity = velocity;
+        }
 
-      aVelocity = velocity;
-      aAcceleration =
+        aVelocity = velocity;
+        aAcceleration =
         tension * (this._endValue - tempPosition) - friction * velocity;
 
-      tempPosition = position + aVelocity * Spring.SOLVER_TIMESTEP_SEC * 0.5;
-      tempVelocity =
+        tempPosition = position + aVelocity * Spring.SOLVER_TIMESTEP_SEC * 0.5;
+        tempVelocity =
         velocity + aAcceleration * Spring.SOLVER_TIMESTEP_SEC * 0.5;
-      bVelocity = tempVelocity;
-      bAcceleration =
+        bVelocity = tempVelocity;
+        bAcceleration =
         tension * (this._endValue - tempPosition) - friction * tempVelocity;
 
-      tempPosition = position + bVelocity * Spring.SOLVER_TIMESTEP_SEC * 0.5;
-      tempVelocity =
+        tempPosition = position + bVelocity * Spring.SOLVER_TIMESTEP_SEC * 0.5;
+        tempVelocity =
         velocity + bAcceleration * Spring.SOLVER_TIMESTEP_SEC * 0.5;
-      cVelocity = tempVelocity;
-      cAcceleration =
+        cVelocity = tempVelocity;
+        cAcceleration =
         tension * (this._endValue - tempPosition) - friction * tempVelocity;
 
-      tempPosition = position + cVelocity * Spring.SOLVER_TIMESTEP_SEC;
-      tempVelocity = velocity + cAcceleration * Spring.SOLVER_TIMESTEP_SEC;
-      dVelocity = tempVelocity;
-      dAcceleration =
+        tempPosition = position + cVelocity * Spring.SOLVER_TIMESTEP_SEC;
+        tempVelocity = velocity + cAcceleration * Spring.SOLVER_TIMESTEP_SEC;
+        dVelocity = tempVelocity;
+        dAcceleration =
         tension * (this._endValue - tempPosition) - friction * tempVelocity;
 
-      dxdt =
+        dxdt =
         1.0 / 6.0 * (aVelocity + 2.0 * (bVelocity + cVelocity) + dVelocity);
-      dvdt =
+        dvdt =
         1.0 /
         6.0 *
         (aAcceleration + 2.0 * (bAcceleration + cAcceleration) + dAcceleration);
 
-      position += dxdt * Spring.SOLVER_TIMESTEP_SEC;
-      velocity += dvdt * Spring.SOLVER_TIMESTEP_SEC;
+        position += dxdt * Spring.SOLVER_TIMESTEP_SEC;
+        velocity += dvdt * Spring.SOLVER_TIMESTEP_SEC;
+      }
+      this._tempState.position = tempPosition;
+      this._tempState.velocity = tempVelocity;
+
+      this._currentState.position = position;
+      this._currentState.velocity = velocity;
+
     }
-
-    this._tempState.position = tempPosition;
-    this._tempState.velocity = tempVelocity;
-
-    this._currentState.position = position;
-    this._currentState.velocity = velocity;
 
     if (this._timeAccumulator > 0) {
       this._interpolate(this._timeAccumulator / Spring.SOLVER_TIMESTEP_SEC);
